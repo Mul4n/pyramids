@@ -6,21 +6,20 @@ function buildThePyramids() {
   // Récupère toutes les pages de grimpeurs (ie. qui commence par *)
   var personalSheets = sheets.filter(function (sheet) { return sheet.getName().indexOf('*') === 0 });
 
-  return personalSheets.reduce(constructPyramid, []);
+  return personalSheets.reduce(constructPyramid, 1);
 }
 
-function constructPyramid(result, sheet, index) {
+function constructPyramid(line, sheet, index) {
   // Nom du grimpeur
 
   var sheetName = sheet.getName();
-  result.push([sheetName.substr(1)]);
 
   // liste de toutes les voies grimpées
   var lastClimb = sheet.getLastRow();
   var climbsGrades = sheet.getRange(2, 2, lastClimb - 1).getValues()
     .map(function (grade) { return grade[0]; })
     .filter(function(grade) { return grade.length; });
-  //triée par difficultés
+  //triées par difficultés
   climbsGrades.sort(sortGrades);
  
   // liste de toutes les cotations grimpées
@@ -41,14 +40,80 @@ function constructPyramid(result, sheet, index) {
   var gradesAndDraw = ALL_GRADES.reduce(checkDoneGrades.bind(this, gradesAndCount, pyramidGrades), {});
   
   // Merger dans result
-  Object.keys(gradesAndDraw).map(function(grade) { result.push(gradesAndDraw[grade]); });
+  const result = Object.keys(gradesAndDraw).reduce((array, grade) => [...array, gradesAndDraw[grade]], []);
+  // On cherche la ligne la plus longue pour que ca soit bien plein pour la range
+  const longestLine = result.reduce((longest, line) => line.length > longest ? line.length : longest, 0);
 
-  // Pyramide pour 1 grimpeur + padding
-  result.push([]);
-  return result;
+  const paddedResult = padArray(result, longestLine);
+
+  // Ajout du nom du grimpeur
+  paddedResult.unshift([sheetName.substr(1), ...new Array(longestLine - 1)]);
+  // paddedResult.push(new Array(longestLine));
+
+  // Transforme le tableau en range sheet pour appliquer du formatting
+  const range = applyArrayToRange(line, longestLine, paddedResult);
+
+  // Ajoute les couleurs
+  setStyle(range);
+
+  // Ajoute le collapse
+  setGroup(range);
+
+  // Renvoi la première ligne a partir d'où construire la pyramide suivante (On laisse une ligne vide)
+  return line  + result.length + 2;
 }
 
 /***********SUB ROUTINES*************/
+function setGroup(range) {
+  const collapsableRange = range.offset(1, 0, range.getHeight() - 1, range.getWidth());
+  const a1 = collapsableRange.getA1Notation();
+  collapsableRange.shiftRowGroupDepth(-2);
+  collapsableRange.shiftRowGroupDepth(1);
+}
+
+function padArray(array, longestLine) {
+  // Pad avec des - jusqu'à max grade pour la colorisation
+  return array.map(line => {
+    const paddedLine = [...line, ...new Array(longestLine - line.length).fill('')];
+
+    // Le premier élément est la cotation elle même, on ne veux colorer que les ticks
+    return paddedLine.fill('-', line.length, PYRAMID_SHAPE[0] + 1);
+  });
+}
+
+function setStyle(range) {
+  // Reset les styles avant de réappliquer
+  range.setFontColor('black');
+  range.setBackground('white');
+  range.setBorder(false, false, false, false, false, false);
+
+  // Bordure pour le nom
+  const nameCell = range.getCell(1,1);
+  nameCell.setBorder(true, true, true, true, false, false);
+  nameCell.setFontWeight('bold');
+
+  // Bordure pour la pyramide (sans encadrer ce qui dépasse des 8)
+  const pyramidRange = range.offset(1, 0, range.getHeight() - 1, 9);
+  pyramidRange.setBorder(true, true, true, true, true, true);
+
+  // Couleurs pour les ticks
+  const finderCross = range.createTextFinder('✖');
+  finderCross.findAll().forEach(cell => cell.setFontColor('#CD5C5C'));
+  const finderCheck = range.createTextFinder('✓');
+  finderCheck.findAll().forEach(cell => cell.setFontColor('#228B22'));
+  const finderEmpty = range.createTextFinder('-');
+  finderEmpty.findAll().forEach(cell => { cell.setBackground('#D3D3D3'); cell.setFontColor('#D3D3D3'); });
+}
+
+function applyArrayToRange(lineNumber, columnNumber, linesArray) {
+  const columnLetter = String.fromCharCode(64 + columnNumber)
+  const lastLine = lineNumber + linesArray.length - 1;
+  const rangeString = `A${lineNumber}:${columnLetter}${lastLine}`;
+
+  var range = SpreadsheetApp.getActiveSpreadsheet().getRange(rangeString);
+  range.setValues(linesArray);
+  return range;
+}
 
 function countSameGrades(climbsGrades, acc, grade) {
   acc[grade] = climbsGrades.filter(function (g) { return g === grade; }).length;
